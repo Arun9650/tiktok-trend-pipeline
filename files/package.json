@@ -1,0 +1,23 @@
+{
+  "name": "whitebeard-tiktok-pipeline",
+  "version": "1.0.0",
+  "description": "Trend discovery -> script generation -> Telegram approval pipeline for WhiteBeard TikTok content",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "schedule": "node src/scheduler.js",
+    "fetch-only": "node src/fetchTrends.js",
+    "render": "node src/renderVideo.js"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.190",
+    "@remotion/renderer": "^4.0.190",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.66.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.190"
+  }
+}
