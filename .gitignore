@@ -3,5 +3,5 @@ node_modules
 *.docx
 *.zip
 .env*
-*.json
+
 *.mp4
