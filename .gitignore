@@ -1,0 +1,7 @@
+node_modules
+*.pdf
+*.docx
+*.zip
+.env*
+*.json
+*.mp4
