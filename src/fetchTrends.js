@@ -35,7 +35,9 @@ async function runActor() {
     hashtags: HASHTAGS,
     resultsPerPage: 100,
     shouldDownloadCovers: false,
-    shouldDownloadVideos: false,
+    // Needed so renderVideo.js can re-edit the actual clip (filter + new
+    // audio) instead of just generating text-over-background from the script.
+    shouldDownloadVideos: true,
   };
 
   const startRes = await fetch(
@@ -116,6 +118,17 @@ function filterAndRank(items) {
         authorName: item.authorMeta?.name ?? null,
         webVideoUrl: item.webVideoUrl ?? null,
         durationSec: item.videoMeta?.duration ?? null,
+        // Direct file URL for the downloaded clip (shouldDownloadVideos above).
+        // clockworks/tiktok-scraper's exact field name for this isn't
+        // documented, so this tries the likely candidates defensively, same
+        // as normalizeCreator() does in fetchCreators.js. If renderVideo.js
+        // errors with "no source video URL", log one raw `item` here and
+        // adjust this line to match, it's a one-line fix.
+        videoDownloadUrl:
+          item.videoMeta?.downloadAddr ??
+          item.videoMeta?.originalDownloadAddr ??
+          item.mediaUrls?.[0] ??
+          null,
       };
     })
     .filter(
@@ -158,6 +171,42 @@ export async function getTrends() {
   return { ranked, soundGroups, rawCount: raw.length };
 }
 
+const REPORT_DIR = './trend-reports';
+
+/**
+ * Plain-text digest of a getTrends() result, short enough to drop straight
+ * into a Telegram message or a terminal.
+ */
+export function formatSummary({ ranked, soundGroups, rawCount }) {
+  const lines = [
+    `Fetched ${rawCount} raw videos, ${ranked.length} passed the fx/trading + engagement filter.`,
+    '',
+  ];
+  ranked.forEach((v, i) => {
+    lines.push(
+      `${i + 1}. [${(v.shareRatio * 100).toFixed(2)}% share, ${v.plays.toLocaleString()} plays] ${v.text.slice(0, 100)}`
+    );
+    if (v.webVideoUrl) lines.push(`   ${v.webVideoUrl}`);
+  });
+  if (ranked.length === 0) {
+    lines.push('Nothing cleared the bar this run. Try lowering MIN_SHARE_RATIO/MIN_PLAY_COUNT or widening TIKTOK_HASHTAGS.');
+  }
+  lines.push('', `Sounds in play: ${soundGroups.length}`);
+  return lines.join('\n');
+}
+
+/**
+ * Write the filtered result to a timestamped JSON file under ./trend-reports
+ * so each run (manual or scheduled) leaves an artifact behind instead of
+ * just console output that scrolls away.
+ */
+export async function saveTrendReport(result) {
+  await fs.mkdir(REPORT_DIR, { recursive: true });
+  const filePath = `${REPORT_DIR}/${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  await fs.writeFile(filePath, JSON.stringify(result, null, 2));
+  return { path: filePath, summary: formatSummary(result) };
+}
+
 // Allow running this file standalone for a quick check:
 // node src/fetchTrends.js
 // Uses pathToFileURL rather than a plain string template because on Windows
@@ -165,16 +214,10 @@ export async function getTrends() {
 // forward slashes — a plain comparison silently never matches there.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   getTrends()
-    .then(({ ranked, soundGroups, rawCount }) => {
-      console.log(`Fetched ${rawCount} raw items, kept ${ranked.length} after filtering.\n`);
-      console.log('Top trends:');
-      ranked.forEach((v, i) => {
-        console.log(
-          `${i + 1}. [${(v.shareRatio * 100).toFixed(2)}% share rate] ${v.text.slice(0, 80)}`
-        );
-      });
-      console.log('\nSounds in play:');
-      soundGroups.forEach((s) => console.log(`- ${s.soundName || 'Unknown'} (${s.examples.length} videos)`));
+    .then(async (result) => {
+      console.log(formatSummary(result));
+      const { path: reportPath } = await saveTrendReport(result);
+      console.log(`\nSaved filtered results to ${reportPath}`);
     })
     .catch((err) => {
       console.error('Failed to fetch trends:', err.message);

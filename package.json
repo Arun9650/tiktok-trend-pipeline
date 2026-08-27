@@ -1,15 +1,17 @@
 {
-  "name": "whitebeard-tiktok-pipeline",
+  "name": "tiktok-trend-pipeline",
   "version": "1.0.0",
-  "description": "Trend discovery -> script generation -> Telegram approval pipeline for WhiteBeard TikTok content",
+  "private": true,
   "type": "module",
-  "main": "src/index.js",
+  "description": "Fetches trending fx/trading TikTok content from Apify, filters it, generates scripts, and renders video.",
   "scripts": {
     "start": "node src/index.js",
-    "schedule": "node src/scheduler.js",
     "fetch-only": "node src/fetchTrends.js",
+    "schedule": "node src/scheduler.js",
     "find-creators": "node src/fetchCreators.js",
-    "render": "node src/renderVideo.js"
+    "stitch": "node src/stitchPipeline.js",
+    "render": "node src/renderVideo.js",
+    "upload": "node src/uploadTikTok.js"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.190",
