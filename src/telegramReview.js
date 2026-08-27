@@ -23,11 +23,29 @@ function escapeMarkdown(text) {
 }
 
 /**
+ * Fire-and-forget plain-text message, no approval buttons and no polling
+ * connection. Used by the scheduler to notify you a fetch+filter run
+ * finished, separate from the interactive approve/reject flow above.
+ */
+export async function sendDigest(text) {
+  if (!BOT_TOKEN || !CHAT_ID) return;
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: CHAT_ID, text: text.slice(0, 4000) }),
+  });
+  if (!res.ok) {
+    console.error(`Telegram digest send failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+/**
  * Post a script to Telegram with Approve/Reject buttons and resolve once
  * you tap one. Each call waits for its own response, so if you queue up
  * several scripts they'll come through one at a time.
  */
 export function requestApproval(script, trendGroup) {
+  if (process.env.AUTO_APPROVE === 'true') return Promise.resolve(true);
   return new Promise((resolve, reject) => {
     const b = getBot();
     const requestId = `${Date.now()}`;
@@ -83,6 +101,7 @@ export function requestApproval(script, trendGroup) {
 // makes clear this isn't a standalone video, it's something to read out loud
 // while recording a Stitch/Duet on the linked source video inside the app.
 export function requestStitchApproval(stitchScript, sourceVideo) {
+  if (process.env.AUTO_APPROVE === 'true') return Promise.resolve(true);
   return new Promise((resolve, reject) => {
     const b = getBot();
     const requestId = `stitch-${Date.now()}`;
