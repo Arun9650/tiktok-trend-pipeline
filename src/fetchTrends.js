@@ -13,6 +13,13 @@ const HASHTAGS = (process.env.TIKTOK_HASHTAGS || 'stockmarket,daytrading,forex')
   .map((h) => h.trim())
   .filter(Boolean);
 
+// Trigger a brand-new scraper run on every call, so the trends actually
+// change run-to-run instead of re-reading one frozen past scrape. This is the
+// default because a "trend pipeline" that reports the same videos forever is
+// pointless. Set FRESH_TRENDS=false to reuse a fixed APIFY_DATASET_ID instead
+// (fast, no Apify credits, but the data never changes).
+const FRESH_TRENDS = process.env.FRESH_TRENDS !== 'false';
+
 const MIN_SHARE_RATIO = Number(process.env.MIN_SHARE_RATIO || 0.005);
 const MIN_PLAY_COUNT = Number(process.env.MIN_PLAY_COUNT || 5000);
 const TOP_N_TRENDS = Number(process.env.TOP_N_TRENDS || 8);
@@ -33,7 +40,7 @@ async function runActor() {
 
   const input = {
     hashtags: HASHTAGS,
-    resultsPerPage: 100,
+    resultsPerPage: 50,
     shouldDownloadCovers: false,
     // Needed so renderVideo.js can re-edit the actual clip (filter + new
     // audio) instead of just generating text-over-background from the script.
@@ -160,11 +167,20 @@ function groupBySound(ranked) {
 export async function getTrends() {
   let raw;
   if (LOCAL_DATASET_PATH) {
+    // Explicit static-file mode: same data every run, by design.
     const fileContents = await fs.readFile(LOCAL_DATASET_PATH, 'utf-8');
     raw = JSON.parse(fileContents);
-  } else {
-    const datasetId = APIFY_DATASET_ID || (await runActor());
+  } else if (FRESH_TRENDS) {
+    // Default: kick off a fresh scrape every run so the trends are new each
+    // time. runActor() returns the dataset id of the run it just completed.
+    const datasetId = await runActor();
     raw = await fetchDataset(datasetId);
+  } else {
+    // Opt-out (FRESH_TRENDS=false): reuse a fixed past dataset.
+    if (!APIFY_DATASET_ID) {
+      throw new Error('FRESH_TRENDS=false requires APIFY_DATASET_ID to be set to a past dataset to reuse.');
+    }
+    raw = await fetchDataset(APIFY_DATASET_ID);
   }
   const ranked = filterAndRank(raw);
   const soundGroups = groupBySound(ranked);

@@ -5,3 +5,8 @@ node_modules
 .env*
 
 *.mp4
+bin/
+cookies.txt
+video-link.txt
+/approved-scripts
+/approved-stitches

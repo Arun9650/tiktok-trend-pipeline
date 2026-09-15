@@ -118,6 +118,34 @@ Output lands in `./rendered-videos/`. First run downloads a headless Chromium
 build for rendering, expect that one to take a few extra minutes; after that
 renders are quick.
 
+## 5. Auto-post to TikTok (Blotato)
+
+`src/postBlotato.js` publishes a rendered video straight to TikTok through
+[Blotato](https://help.blotato.com/api/start). Blotato owns the TikTok OAuth
+connection, so this posts directly to the profile — no audited-app wait and no
+manual inbox step (that's the `npm run upload` fallback in `uploadTikTok.js`).
+
+One-time setup: connect TikTok in the Blotato dashboard, put `BLOTATO_API_KEY`
+in `.env`, then find your account id:
+
+```bash
+npm run blotato-accounts
+```
+
+Copy the TikTok `id` into `BLOTATO_TIKTOK_ACCOUNT_ID`, then post:
+
+```bash
+npm run post                                   # posts the latest rendered video
+npm run post -- ./rendered-videos/foo.mp4      # posts a specific file
+```
+
+The caption comes from the matching approved script automatically. Set
+`BLOTATO_SCHEDULED_TIME` (ISO 8601) to schedule instead of posting immediately;
+see `.env.example` for the TikTok privacy/comment/AI-disclosure toggles.
+
+**Still silent by design** — see the note below. If you want the trending
+sound, use `npm run upload` (Upload-to-Inbox) and add it in-app instead.
+
 **The video is silent on purpose.** There's no way to legally bake in the
 actual trending TikTok sound through code, that audio belongs to whoever
 posted the original clip, and TikTok's Content Posting API doesn't expose
@@ -131,8 +159,11 @@ Caption and hashtags aren't rendered into the video itself, they're meant for
 the TikTok post description when you publish, whether that's manual upload
 now or automated later through the Content Posting API.
 
-## Not built yet
+## Publishing options
 
-- TikTok Content Posting API integration (actually publishing the rendered
-  video). Register your app now at developers.tiktok.com since review takes
-  2-6 weeks. Until it's approved, upload rendered videos manually.
+- **Blotato (`npm run post`)** — direct auto-post to profile, recommended. See
+  step 5 above.
+- **TikTok Content Posting API (`npm run upload`)** — Upload-to-Inbox mode,
+  which works with an unaudited app; the video lands in drafts and you add the
+  trending sound + publish in-app. Direct-post through this API needs an
+  audited app (register at developers.tiktok.com; review takes 2-6 weeks).

@@ -11,7 +11,9 @@
     "find-creators": "node src/fetchCreators.js",
     "stitch": "node src/stitchPipeline.js",
     "render": "node src/renderVideo.js",
-    "upload": "node src/uploadTikTok.js"
+    "upload": "node src/uploadTikTok.js",
+    "post": "node src/postBlotato.js",
+    "blotato-accounts": "node src/postBlotato.js --accounts"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.190",

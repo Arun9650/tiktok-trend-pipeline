@@ -1,4 +1,4 @@
-import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig, interpolate } from 'remotion';
+import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, useVideoConfig, interpolate } from 'remotion';
 
 const FPS = 30;
 const COLORS = {
@@ -100,6 +100,8 @@ export function ScriptVideo({ hook, beats, cta, estimatedDurationSec = 30 }) {
 
   return (
     <AbsoluteFill style={{ backgroundColor: COLORS.bg }}>
+      <Audio src={staticFile('background-audio.mp3')} volume={0.6} />
+
       <ChartBackground />
 
       <Sequence from={0} durationInFrames={hookFrames}>

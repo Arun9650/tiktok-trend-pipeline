@@ -43,29 +43,24 @@ async function resolveClipUrl(webVideoUrl) {
   return url.startsWith('http') ? url : `https://www.tikwm.com${url}`;
 }
 
-async function findLatestApprovedScript() {
+async function listApprovedScripts() {
   const files = await fs.readdir(APPROVED_DIR);
   const jsonFiles = files.filter((f) => f.endsWith('.json'));
   if (jsonFiles.length === 0) {
     throw new Error(`No approved scripts found in ${APPROVED_DIR}. Run the pipeline and approve one via Telegram first.`);
   }
-  // Filenames are timestamp-prefixed, so a plain sort puts the newest one last.
+  // Filenames are timestamp-prefixed, so a plain sort renders oldest-first.
   jsonFiles.sort();
-  return path.join(APPROVED_DIR, jsonFiles[jsonFiles.length - 1]);
+  return jsonFiles.map((f) => path.join(APPROVED_DIR, f));
 }
 
-async function main() {
-  const scriptPath = process.argv[2] || (await findLatestApprovedScript());
-  console.log(`Source clip from: ${scriptPath}`);
-
+// Render a single approved script to an mp4. `manualUrl` (if given) overrides
+// the clip source; in batch mode it's left undefined so every script uses its
+// own webVideoUrl. Returns the output path, or null if it was skipped.
+async function renderOne(scriptPath, manualUrl) {
   const { trendGroup } = JSON.parse(await fs.readFile(scriptPath, 'utf-8'));
   const sourceVideo = trendGroup?.examples?.[0];
 
-  // Manual direct-URL override (SOURCE_VIDEO_URL or ./video-link.txt); otherwise
-  // resolve a fresh mp4 from the stable webVideoUrl via tikwm.
-  const manualUrl =
-    process.env.SOURCE_VIDEO_URL ||
-    (await fs.readFile('./video-link.txt', 'utf-8').catch(() => '')).trim();
   if (!sourceVideo?.webVideoUrl && !manualUrl) {
     throw new Error(
       'No way to get the source clip: this script has no webVideoUrl to resolve, and no ' +
@@ -73,16 +68,29 @@ async function main() {
     );
   }
 
-  await fs.mkdir(WORK_DIR, { recursive: true });
-  const sourcePath = path.join(WORK_DIR, 'source-video.mp4');
-  const clipUrl = manualUrl || (await resolveClipUrl(sourceVideo.webVideoUrl));
-  console.log(`Downloading clip${manualUrl ? ' from manual URL' : ` (resolved from ${sourceVideo.webVideoUrl})`}...`);
-  await downloadTo(clipUrl, sourcePath);
-
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
   const outputPath = path.join(OUTPUT_DIR, `${path.basename(scriptPath, '.json')}.mp4`);
 
-  console.log('Applying color filter (keeping original audio)...');
+  // Skip anything already rendered so re-running the batch only fills gaps.
+  // Set FORCE_RERENDER=true to overwrite existing outputs.
+  if (process.env.FORCE_RERENDER !== 'true') {
+    const alreadyDone = await fs
+      .stat(outputPath)
+      .then(() => true)
+      .catch(() => false);
+    if (alreadyDone) {
+      console.log(`  skip (already rendered): ${path.basename(outputPath)}`);
+      return null;
+    }
+  }
+
+  await fs.mkdir(WORK_DIR, { recursive: true });
+  const sourcePath = path.join(WORK_DIR, 'source-video.mp4');
+  const clipUrl = manualUrl || (await resolveClipUrl(sourceVideo.webVideoUrl));
+  console.log(`  downloading clip${manualUrl ? ' from manual URL' : ` (resolved from ${sourceVideo.webVideoUrl})`}...`);
+  await downloadTo(clipUrl, sourcePath);
+
+  console.log('  applying color filter (keeping original audio)...');
   await execFileAsync(FFMPEG, [
     '-y',
     '-i', sourcePath,
@@ -91,7 +99,78 @@ async function main() {
     outputPath,
   ]);
 
-  console.log(`\nDone. Color-graded video with original audio saved to ${outputPath}`);
+  console.log(`  done -> ${outputPath}`);
+  return outputPath;
+}
+
+async function main() {
+  // Manual direct-URL override (SOURCE_VIDEO_URL or ./video-link.txt). This
+  // only makes sense for a single script, so it's ignored in batch mode.
+  const manualUrl =
+    process.env.SOURCE_VIDEO_URL ||
+    (await fs.readFile('./video-link.txt', 'utf-8').catch(() => '')).trim();
+
+  // Explicit single-script mode: `node src/renderVideo.js path/to/script.json`.
+  const explicitPath = process.argv[2];
+  if (explicitPath) {
+    console.log(`Rendering single script: ${explicitPath}`);
+    await renderOne(explicitPath, manualUrl || undefined);
+    return;
+  }
+
+  // Default: render every approved script — but dedupe by source clip first.
+  // This renderer only color-grades the source clip (it doesn't burn in the
+  // per-script text), so N scripts sharing one webVideoUrl would produce N
+  // identical videos. Render each distinct clip exactly once.
+  const scripts = await listApprovedScripts();
+
+  const seen = new Set();
+  const unique = [];
+  let duplicates = 0;
+  for (const scriptPath of scripts) {
+    let url;
+    try {
+      const { trendGroup } = JSON.parse(await fs.readFile(scriptPath, 'utf-8'));
+      url = trendGroup?.examples?.[0]?.webVideoUrl;
+    } catch {
+      url = undefined;
+    }
+    // Scripts without a resolvable clip URL can't collide on one, so keep each
+    // (renderOne will surface the real error for them).
+    const key = url || `__no_url__:${scriptPath}`;
+    if (seen.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(key);
+    unique.push(scriptPath);
+  }
+
+  console.log(
+    `Found ${scripts.length} approved script(s) -> ${unique.length} unique source clip(s) ` +
+      `(${duplicates} duplicate script(s) skipped). Rendering...\n`
+  );
+
+  let rendered = 0;
+  let skipped = 0;
+  const failures = [];
+  for (const [i, scriptPath] of unique.entries()) {
+    console.log(`[${i + 1}/${unique.length}] ${path.basename(scriptPath)}`);
+    try {
+      const out = await renderOne(scriptPath); // no manualUrl: use each clip's own url
+      if (out) rendered += 1;
+      else skipped += 1;
+    } catch (err) {
+      console.error(`  FAILED: ${err.message}`);
+      failures.push({ scriptPath, message: err.message });
+    }
+  }
+
+  console.log(`\nBatch complete. Rendered ${rendered}, skipped ${skipped}, failed ${failures.length} (of ${unique.length} unique clips).`);
+  if (failures.length) {
+    console.log('Failures:');
+    for (const f of failures) console.log(`  - ${path.basename(f.scriptPath)}: ${f.message}`);
+  }
 }
 
 main().catch((err) => {

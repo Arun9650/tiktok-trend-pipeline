@@ -56,7 +56,8 @@ async function main() {
 
   console.log(`\nDone. Video saved to ${outputPath}`);
   console.log(
-    'This video is silent on purpose: baking in a copyrighted TikTok sound isn\'t something the API supports anyway. ' +
+    'This video has background music baked in (remotion/public/background-audio.mp3). ' +
+    'It does NOT include a copyrighted TikTok trending sound: the API doesn\'t support that anyway. ' +
     'Add the trending sound inside the TikTok app before you publish, same as any Upload to Inbox draft.'
   );
 }
