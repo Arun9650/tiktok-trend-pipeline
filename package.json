@@ -18,6 +18,7 @@
     "repost:gather": "node src/repost/pipeline.js",
     "repost:resolve": "node src/repost/resolveAccounts.js",
     "repost:discover": "node src/repost/discoverVideos.js",
+    "repost:creators": "node src/repost/discoverCreators.js",
     "repost:post": "node src/repost/autopost.js",
     "repost:schedule": "node src/repost/postScheduler.js"
   },

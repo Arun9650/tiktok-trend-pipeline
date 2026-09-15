@@ -64,6 +64,11 @@ export function extractVideo(item) {
     text: item.text ?? '',
     authorHandle: item.authorMeta?.name ?? null,
     authorNick: item.authorMeta?.nickName ?? null,
+    authorFans: item.authorMeta?.fans ?? 0,
+    authorVerified: item.authorMeta?.verified ?? false,
+    authorProfileUrl:
+      item.authorMeta?.profileUrl ??
+      (item.authorMeta?.name ? `https://www.tiktok.com/@${item.authorMeta.name}` : null),
     webVideoUrl: item.webVideoUrl ?? null,
     plays: item.playCount ?? item.videoMeta?.playCount ?? 0,
     shares: item.shareCount ?? 0,

@@ -55,6 +55,18 @@ until you've eyeballed a queued clip, then flip it off for real posts.
 Individual stages are runnable standalone for debugging:
 `npm run repost:resolve`, `npm run repost:discover`.
 
+**Find popular finance creators** — a discovery helper that searches finance
+hashtags and lists the most-followed creators (a watch/source shortlist, it does
+not repost anyone):
+
+```bash
+npm run repost:creators          # prints ranked creators + saves finance-creators.json
+```
+
+In the UI there's a **Find finance creators** button that runs the same thing
+and shows the usernames (with follower counts, linked to their profiles). Tune
+the search with `REPOST_FINANCE_TERMS` and `REPOST_MAX_CREATORS`.
+
 ## Configuration (.env)
 
 Reuses `APIFY_TOKEN`, `BLOTATO_API_KEY`, `TELEGRAM_BOT_TOKEN/CHAT_ID`, and
@@ -73,6 +85,10 @@ REPOST_VIDEOS_PER_ACCOUNT=30      # history depth scanned per account
 REPOST_TOP_VIDEOS_PER_ACCOUNT=3   # top performers kept per account
 REPOST_MIN_PLAYS=10000            # floor for "proven"
 REPOST_MAX_OUTPUTS_PER_RUN=1      # process one video per gather run (raise to batch)
+
+# --- Find popular finance creators ---
+REPOST_FINANCE_TERMS=#fintok,#investing,#stocktok,#trading,#personalfinance,#finance
+REPOST_MAX_CREATORS=20            # how many ranked creators to return
 
 # --- Storage: set both buckets for S3, or leave unset for local dirs ---
 AWS_REGION=us-east-1

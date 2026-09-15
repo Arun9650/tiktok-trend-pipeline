@@ -28,6 +28,12 @@ export const config = {
   // --- Volume caps (open question in PRD: volume per run). Kept low so a
   // pilot run is cheap and the 3h cadence isn't blown through in one batch. ---
   maxAccounts: num(process.env.REPOST_MAX_ACCOUNTS, 5),
+  // Popular-finance-creator discovery: which finance terms/hashtags to search,
+  // and how many ranked creators to return.
+  financeTerms: list(process.env.REPOST_FINANCE_TERMS, [
+    '#fintok', '#investing', '#stocktok', '#trading', '#personalfinance', '#finance',
+  ]),
+  maxCreators: num(process.env.REPOST_MAX_CREATORS, 20),
   searchResultsPerTerm: num(process.env.REPOST_SEARCH_RESULTS, 15),
   videosPerAccount: num(process.env.REPOST_VIDEOS_PER_ACCOUNT, 30),
   topVideosPerAccount: num(process.env.REPOST_TOP_VIDEOS_PER_ACCOUNT, 3),
