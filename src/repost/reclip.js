@@ -160,8 +160,10 @@ export async function reclipOne(video) {
   const outPath = path.join(dir, 'out.mp4');
   await fs.writeFile(inPath, rawBytes);
 
+  // captionText is kept for metadata / the post description even when we don't
+  // burn it onto the video (config.captionEnabled=false = filter-only clip).
   const captionText = buildCaption(video);
-  const { text, emojis } = extractEmoji(captionText);
+  const { text, emojis } = config.captionEnabled ? extractEmoji(captionText) : { text: '', emojis: [] };
   const wrapped = text ? wrapCaption(text, { perLine: 26, maxLines: 3 }) : '';
   const nLines = wrapped ? wrapped.split('\n').length : 0;
   if (wrapped) await fs.writeFile(path.join(dir, 'cap.txt'), wrapped, 'utf-8');

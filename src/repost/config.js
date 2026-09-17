@@ -58,6 +58,10 @@ export const config = {
   clipDurationSec: num(process.env.REPOST_CLIP_SECONDS, 30),
   // Trim this many seconds off the very start (intros rarely hook). 0 = keep.
   clipStartOffsetSec: num(process.env.REPOST_CLIP_START, 0),
+  // Burn the caption text/emoji onto the clip? Off for now = filter-only output
+  // (just the grade + micro-zoom, no on-screen text). The post description
+  // caption is unaffected. Flip REPOST_CAPTION_ENABLED=true to bring text back.
+  captionEnabled: bool(process.env.REPOST_CAPTION_ENABLED, false),
   // Burned-in caption style. Small black text on a transparent background,
   // drawn with ffmpeg drawtext; emoji are overlaid separately as color PNGs
   // (see emoji.js) because neither drawtext nor libass renders color emoji on
