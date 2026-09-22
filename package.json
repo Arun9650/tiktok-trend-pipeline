@@ -20,6 +20,7 @@
     "repost:discover": "node src/repost/discoverVideos.js",
     "repost:creators": "node src/repost/discoverCreators.js",
     "repost:post": "node src/repost/autopost.js",
+    "repost:post-ready": "node src/repost/postReady.js",
     "repost:schedule": "node src/repost/postScheduler.js"
   },
   "dependencies": {

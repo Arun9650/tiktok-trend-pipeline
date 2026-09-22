@@ -13,6 +13,8 @@ import fs from 'fs/promises';
 //   list accounts: node src/postBlotato.js --accounts
 //   post latest:   node src/postBlotato.js
 //   post a file:   node src/postBlotato.js ./rendered-videos/foo.mp4
+//   post by name:  node src/postBlotato.js foo        (resolves ./rendered-videos/foo.mp4)
+// (via npm, forward args with --, e.g. `npm run post -- foo`)
 
 const API_KEY = process.env.BLOTATO_API_KEY;
 const BASE_URL = 'https://backend.blotato.com/v2';
@@ -136,6 +138,27 @@ async function latestRenderedVideo() {
   return path.join(OUTPUT_DIR, withTime[0].f);
 }
 
+// Resolve a positional CLI arg to a rendered video path. Accepts either a full
+// path to an .mp4 or a bare script/base name (with or without .mp4), which is
+// looked up in ./rendered-videos. Returns null if no positional arg was given
+// (so main() can fall back to the latest render). Throws if a name WAS given
+// but matches no file — better a clear error than silently posting a different
+// (newest) video.
+async function resolveVideoArg() {
+  const arg = process.argv.slice(2).find((a) => !a.startsWith('--'));
+  if (!arg) return null;
+
+  const withExt = arg.endsWith('.mp4') ? arg : `${arg}.mp4`;
+  const candidates = [arg, withExt, path.join(OUTPUT_DIR, path.basename(withExt))];
+  for (const c of candidates) {
+    if (await fs.stat(c).then((s) => s.isFile()).catch(() => false)) return c;
+  }
+  throw new Error(
+    `No rendered video found for "${arg}". Looked in: ${candidates.join(', ')}. ` +
+      'Run `npm run render` first, or check the name.'
+  );
+}
+
 // Rendered videos are named <scriptBasename>.mp4, so we can recover the caption
 // the LLM already wrote for this clip. Falls back to the hook, then env, then ''.
 async function captionFor(videoPath) {
@@ -172,7 +195,7 @@ async function main() {
     );
   }
 
-  const videoPath = process.argv.find((a) => a.endsWith('.mp4')) || (await latestRenderedVideo());
+  const videoPath = (await resolveVideoArg()) || (await latestRenderedVideo());
   const caption = await captionFor(videoPath);
   const scheduledTime = process.env.BLOTATO_SCHEDULED_TIME || undefined;
 
