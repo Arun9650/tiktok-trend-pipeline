@@ -1,0 +1,294 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Serverless TikTok repost pipeline. One Fargate task definition, run two ways:
+  a one-time GATHER run (command overridden to src/repost/pipeline.js) fills a
+  persistent EFS volume with the top N edited clips + queue.json (entries spaced
+  3h apart); an EventBridge schedule then polls every 30m with the default
+  command (src/repost/autopost.js), posting each clip once its scheduled time
+  arrives, guarded by autopost's live 3h-gap check. Polling finer than the 3h
+  cadence avoids drift. All state and video files live on EFS so they survive
+  between the separate task runs.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: tiktok-repost
+    Description: Name prefix for all created resources.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to run tasks + EFS in (the account's default VPC is fine).
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Public subnets (one per AZ) for the Fargate tasks and EFS mount targets.
+
+  # --- Pipeline tuning (become container env vars) ---
+  RepostAccounts:
+    Type: String
+    Default: ''
+    Description: Comma-separated TikTok handles to scan (optional; blank = use hashtags).
+  RepostHashtags:
+    Type: String
+    Default: '#fintok,#investing,#stocktok,#trading,#personalfinance'
+    Description: Comma-separated hashtags to discover creators from when no accounts are given.
+  MaxOutputsPerRun:
+    Type: Number
+    Default: 5
+    Description: How many top videos one gather run selects (your "top 5").
+  MinGapHours:
+    Type: Number
+    Default: 3
+    Description: Minimum hours between posts on the account.
+  MaxPostsPerDay:
+    Type: Number
+    Default: 5
+    Description: Per-day cap used when scheduling (>=MaxOutputsPerRun for clean 3h spacing).
+
+  # --- Secret SSM parameter names (created by deploy.ps1 as SecureString) ---
+  BlotatoKeyParam:
+    Type: String
+    Default: /tiktok-repost/BLOTATO_API_KEY
+  BlotatoAccountIdParam:
+    Type: String
+    Default: /tiktok-repost/BLOTATO_ACCOUNT_ID
+  ApifyTokenParam:
+    Type: String
+    Default: /tiktok-repost/APIFY_TOKEN
+
+Resources:
+  # --- Image registry ---
+  EcrRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ProjectName
+      ImageTagMutability: MUTABLE
+      EmptyOnDelete: true
+
+  # --- Logs ---
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${ProjectName}'
+      RetentionInDays: 14
+
+  # --- Networking: one SG for both tasks and EFS, self-allowing NFS ---
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${ProjectName} Fargate tasks + EFS'
+      VpcId: !Ref VpcId
+
+  EfsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 2049
+      ToPort: 2049
+      SourceSecurityGroupId: !Ref TaskSecurityGroup
+      Description: NFS from tasks in this group to EFS mount targets.
+
+  # --- Persistent state + video store ---
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-data'
+
+  MountTarget0:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Select [0, !Ref SubnetIds]
+      SecurityGroups: [!Ref TaskSecurityGroup]
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Select [1, !Ref SubnetIds]
+      SecurityGroups: [!Ref TaskSecurityGroup]
+
+  AccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref FileSystem
+      PosixUser:
+        Uid: '1000'
+        Gid: '1000'
+      RootDirectory:
+        Path: /repost-data
+        CreationInfo:
+          OwnerUid: '1000'
+          OwnerGid: '1000'
+          Permissions: '0755'
+
+  # --- ECS ---
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ProjectName
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [ssm:GetParameters]
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${BlotatoKeyParam}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${BlotatoAccountIdParam}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApifyTokenParam}'
+              - Effect: Allow
+                Action: [kms:Decrypt]
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: efs-client
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                Resource: !GetAtt FileSystem.Arn
+
+  TaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref ProjectName
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '1024'
+      Memory: '2048'
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: repost-data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref FileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref AccessPoint
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: app
+          # No Command here: the image CMD (autopost --force) is the scheduled
+          # posting job. The one-time gather run overrides the command via
+          # `aws ecs run-task --overrides` in deploy.ps1.
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectName}:latest'
+          Essential: true
+          MountPoints:
+            - SourceVolume: repost-data
+              ContainerPath: /mnt/repost-data
+          Environment:
+            - { Name: REPOST_DATA_DIR, Value: /mnt/repost-data }
+            - { Name: REPOST_LOCAL_RAW_DIR, Value: /mnt/repost-data/raw }
+            - { Name: REPOST_LOCAL_READY_DIR, Value: /mnt/repost-data/ready }
+            - { Name: FFMPEG_PATH, Value: ffmpeg }
+            - { Name: REPOST_REQUIRE_APPROVAL, Value: 'false' }
+            - { Name: AUTO_APPROVE, Value: 'true' }
+            - { Name: REPOST_MAX_OUTPUTS_PER_RUN, Value: !Ref MaxOutputsPerRun }
+            - { Name: REPOST_MIN_GAP_HOURS, Value: !Ref MinGapHours }
+            - { Name: REPOST_MAX_POSTS_PER_DAY, Value: !Ref MaxPostsPerDay }
+            - { Name: REPOST_ACCOUNTS, Value: !Ref RepostAccounts }
+            - { Name: REPOST_HASHTAGS, Value: !Ref RepostHashtags }
+          Secrets:
+            - Name: BLOTATO_API_KEY
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${BlotatoKeyParam}'
+            - Name: REPOST_BLOTATO_ACCOUNT_ID
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${BlotatoAccountIdParam}'
+            - Name: APIFY_TOKEN
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApifyTokenParam}'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
+  # --- Schedule: poll the queue every 30m (default command = autopost) ---
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-post-task
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref TaskDef
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt ExecutionRole.Arn
+                  - !GetAtt TaskRole.Arn
+                Condition:
+                  StringLike:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+
+  PostSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub '${ProjectName}-post-poll'
+      ScheduleExpression: rate(30 minutes)
+      FlexibleTimeWindow: { Mode: 'OFF' }
+      State: ENABLED
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDef
+          LaunchType: FARGATE
+          TaskCount: 1
+          NetworkConfiguration:
+            AwsvpcConfiguration:
+              Subnets: !Ref SubnetIds
+              SecurityGroups: [!Ref TaskSecurityGroup]
+              AssignPublicIp: ENABLED
+
+Outputs:
+  EcrRepoUri:
+    Description: Push the image here.
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectName}'
+  ClusterName:
+    Value: !Ref Cluster
+  TaskDefArn:
+    Value: !Ref TaskDef
+  SecurityGroupId:
+    Value: !Ref TaskSecurityGroup
+  SubnetList:
+    Value: !Join [',', !Ref SubnetIds]

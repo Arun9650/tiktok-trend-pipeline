@@ -7,7 +7,10 @@ import { config } from './config.js';
 // account per 3 hours. Both are plain JSON files so state survives restarts and
 // is easy to inspect/reset by hand.
 
-const DATA_DIR = './repost-data';
+// Where the queue/log/processed JSON lives. Configurable so a serverless/EFS
+// deploy can point all state at a persistent mount (e.g. /mnt/repost-data)
+// shared across separate gather and posting task runs.
+const DATA_DIR = config.dataDir;
 const QUEUE_PATH = path.join(DATA_DIR, 'queue.json');
 const LOG_PATH = path.join(DATA_DIR, 'posting-log.json');
 // Source video keys we've already turned into a post (or tried to), so no

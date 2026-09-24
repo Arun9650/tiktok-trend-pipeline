@@ -16,6 +16,7 @@
     "blotato-accounts": "node src/postBlotato.js --accounts",
     "repost:ui": "node src/repost/server.js",
     "repost:gather": "node src/repost/pipeline.js",
+    "repost:dry": "node src/repost/pipeline.js --dry-run --auto-approve --max=5",
     "repost:resolve": "node src/repost/resolveAccounts.js",
     "repost:discover": "node src/repost/discoverVideos.js",
     "repost:creators": "node src/repost/discoverCreators.js",

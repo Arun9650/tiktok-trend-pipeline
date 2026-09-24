@@ -51,6 +51,10 @@ export const config = {
   readyBucket: process.env.REPOST_READY_BUCKET, // edited / ready-to-post
   localRawDir: process.env.REPOST_LOCAL_RAW_DIR || './repost-data/raw',
   localReadyDir: process.env.REPOST_LOCAL_READY_DIR || './repost-data/ready',
+  // Directory for the queue/posting-log/processed-sources JSON state. Point this
+  // at a persistent shared mount (EFS) for a serverless deploy so state survives
+  // between separate gather and posting task runs.
+  dataDir: process.env.REPOST_DATA_DIR || './repost-data',
 
   // --- Stage 4 editing ---
   ffmpegPath: process.env.FFMPEG_PATH || './bin/ffmpeg.exe',

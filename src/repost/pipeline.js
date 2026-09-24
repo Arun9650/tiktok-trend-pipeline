@@ -32,10 +32,18 @@ export async function runGather(input = {}) {
   // the same clip is never reposted twice. Dedup within this batch too.
   const processed = await readProcessed();
   const seenThisRun = new Set();
+  const seenAccounts = new Set();
+  // shortlist is sorted best-first (by plays), so the first video we keep for an
+  // account is that account's strongest. We keep at most one per account so the
+  // batch of N is N *distinct* creators, not several clips from one account —
+  // every posted video comes from a unique source account.
   const fresh = shortlist.filter((v) => {
     const k = sourceKey(v);
     if (!k || processed.has(k) || seenThisRun.has(k)) return false;
+    const acct = (v.sourceAccount || '').toLowerCase();
+    if (acct && seenAccounts.has(acct)) return false;
     seenThisRun.add(k);
+    if (acct) seenAccounts.add(acct);
     return true;
   });
   const skipped = shortlist.length - fresh.length;
@@ -86,6 +94,17 @@ export async function runGather(input = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  // Convenience flags for a local dry run without editing .env:
+  //   --dry-run       never publish (gather already doesn't post, but this also
+  //                   makes any downstream posting a rehearsal)
+  //   --auto-approve  skip the Telegram review gate
+  //   --max=N         select the top N videos this run (e.g. --max=5)
+  const args = process.argv.slice(2);
+  if (args.includes('--dry-run')) config.dryRun = true;
+  if (args.includes('--auto-approve')) config.requireApproval = false;
+  const maxArg = args.find((a) => a.startsWith('--max='));
+  if (maxArg) config.maxOutputsPerRun = Number(maxArg.slice('--max='.length)) || config.maxOutputsPerRun;
+
   runGather()
     .then(() => process.exit(0))
     .catch((err) => {
