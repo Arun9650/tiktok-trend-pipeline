@@ -62,6 +62,12 @@ export const config = {
   clipDurationSec: num(process.env.REPOST_CLIP_SECONDS, 30),
   // Trim this many seconds off the very start (intros rarely hook). 0 = keep.
   clipStartOffsetSec: num(process.env.REPOST_CLIP_START, 0),
+  // Split each source into sequential parts and post each as its own clip (a
+  // "Part 1/2/3" series, 3h apart) instead of a single hook clip. Default 2
+  // parts; 3 parts when the usable source runs longer than splitThresholdSec.
+  // Set REPOST_SPLIT_PARTS=false to fall back to the single clipDurationSec clip.
+  splitParts: bool(process.env.REPOST_SPLIT_PARTS, true),
+  splitThresholdSec: num(process.env.REPOST_SPLIT_3_OVER_SEC, 60),
   // Burn the caption text/emoji onto the clip? Off for now = filter-only output
   // (just the grade + micro-zoom, no on-screen text). The post description
   // caption is unaffected. Flip REPOST_CAPTION_ENABLED=true to bring text back.

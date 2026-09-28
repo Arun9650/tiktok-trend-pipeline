@@ -14,15 +14,11 @@
     "upload": "node src/uploadTikTok.js",
     "post": "node src/postBlotato.js",
     "blotato-accounts": "node src/postBlotato.js --accounts",
-    "repost:ui": "node src/repost/server.js",
     "repost:gather": "node src/repost/pipeline.js",
     "repost:dry": "node src/repost/pipeline.js --dry-run --auto-approve --max=5",
     "repost:resolve": "node src/repost/resolveAccounts.js",
     "repost:discover": "node src/repost/discoverVideos.js",
-    "repost:creators": "node src/repost/discoverCreators.js",
-    "repost:post": "node src/repost/autopost.js",
-    "repost:post-ready": "node src/repost/postReady.js",
-    "repost:schedule": "node src/repost/postScheduler.js"
+    "repost:post": "node src/repost/autopost.js"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.190",

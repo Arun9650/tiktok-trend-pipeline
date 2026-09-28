@@ -15,13 +15,12 @@ reposts them to your account on a 3-hour cadence.
 
 | Stage | File | What it does |
 |---|---|---|
-| 0 Input UI | `server.js` | Web form (accounts / hashtags / names) + Gather button |
 | 1 Account resolution | `resolveAccounts.js` | Mixed input → deduped handle list (search resolves hashtags/names) |
 | 2 Discovery | `discoverVideos.js` | Scan each account, rank by views, tag each top video with its sound |
 | 3 Download + storage | `download.js`, `storage.js` | Download shortlist → **raw** bucket (S3 or local) |
 | 4 Re-clip + caption | `reclip.js`, `caption.js` | ffmpeg chop + burned-in hook caption → **ready** bucket |
 | 5 Sound + schedule | `trendingSounds.js`, `postQueue.js` | Attach a trending sound, queue with 3h spacing |
-| 6 Auto-post | `autopost.js`, `postScheduler.js` | Post via Blotato, enforcing the 3h min gap per account |
+| 6 Auto-post | `autopost.js` | Post via Blotato, enforcing the 3h min gap per account |
 
 `pipeline.js` orchestrates stages 1–5 (`runGather`). Stage 6 runs separately so
 posting cadence is driven by wall-clock time, not by when a gather finishes.
@@ -37,35 +36,26 @@ npm install
 #    BLOTATO_API_KEY + REPOST_BLOTATO_ACCOUNT_ID. Start with REPOST_DRY_RUN=true.
 
 # 3. GATHER — resolve → discover → download → re-clip+caption → queue.
-#    Processes ONE video per run by default (REPOST_MAX_OUTPUTS_PER_RUN=1).
+#    Selects the top N distinct-account videos (REPOST_MAX_OUTPUTS_PER_RUN).
 npm run repost:gather          # headless, uses inputs from .env
-#    …or drive it from the browser form instead:
-npm run repost:ui              # http://localhost:3100, fill in + hit Gather
+npm run repost:dry             # …or a safe rehearsal: top 5, no approval, no posting
 
 # 4. POST — publish whatever is due, enforcing the 3h gap per account.
 npm run repost:post            # run this whenever a slot is due
-npm run repost:schedule        # …or leave this running to post on a timer
 ```
 
 So: **`repost:gather` first** (builds the queue), then **`repost:post`** (drains
-it on cadence). Run `gather` again each time you want another clip queued — one
-video per run keeps a pilot at exactly the 3h cadence. Keep `REPOST_DRY_RUN=true`
-until you've eyeballed a queued clip, then flip it off for real posts.
+it on cadence). Keep `REPOST_DRY_RUN=true` until you've eyeballed a queued clip,
+then flip it off for real posts.
 
 Individual stages are runnable standalone for debugging:
 `npm run repost:resolve`, `npm run repost:discover`.
 
-**Find popular finance creators** — a discovery helper that searches finance
-hashtags and lists the most-followed creators (a watch/source shortlist, it does
-not repost anyone):
+## Running it hands-off on AWS
 
-```bash
-npm run repost:creators          # prints ranked creators + saves finance-creators.json
-```
-
-In the UI there's a **Find finance creators** button that runs the same thing
-and shows the usernames (with follower counts, linked to their profiles). Tune
-the search with `REPOST_FINANCE_TERMS` and `REPOST_MAX_CREATORS`.
+`../../deploy/` contains a serverless deployment (ECS Fargate + EFS + an
+EventBridge schedule) that runs the gather once and then posts one clip every
+~3 hours automatically. See `deploy/README.md` for the one-command setup.
 
 ## Configuration (.env)
 
@@ -84,11 +74,7 @@ REPOST_SEARCH_RESULTS=15          # results per hashtag/name search term
 REPOST_VIDEOS_PER_ACCOUNT=30      # history depth scanned per account
 REPOST_TOP_VIDEOS_PER_ACCOUNT=3   # top performers kept per account
 REPOST_MIN_PLAYS=10000            # floor for "proven"
-REPOST_MAX_OUTPUTS_PER_RUN=1      # process one video per gather run (raise to batch)
-
-# --- Find popular finance creators ---
-REPOST_FINANCE_TERMS=#fintok,#investing,#stocktok,#trading,#personalfinance,#finance
-REPOST_MAX_CREATORS=20            # how many ranked creators to return
+REPOST_MAX_OUTPUTS_PER_RUN=1      # top N videos per gather run, each a distinct account
 
 # --- Storage: set both buckets for S3, or leave unset for local dirs ---
 AWS_REGION=us-east-1
@@ -120,8 +106,6 @@ REPOST_BLOTATO_ACCOUNT_ID=        # pilot account (falls back to BLOTATO_TIKTOK_
 REPOST_MIN_GAP_HOURS=3            # HARD rule — do not lower
 REPOST_MAX_POSTS_PER_DAY=4
 REPOST_DRY_RUN=false              # true = run everything but don't call Blotato
-REPOST_POST_CRON=*/30 * * * *     # how often the poster checks for due posts
-REPOST_UI_PORT=3100
 ```
 
 ## Design notes & open-question decisions
@@ -155,11 +139,14 @@ REPOST_UI_PORT=3100
     that's a concern, use `twemoji` (freely licensed).
 - **Review step** (open question): defaults ON via Telegram. Set `AUTO_APPROVE=true`
   (or leave Telegram unconfigured) to run fully unattended in dev.
-- **Every output is unique** — two independent guarantees:
+- **Every output is unique** — three independent guarantees:
   - *No source is reposted twice.* Each produced clip's source key (video id /
     URL) is recorded in `processed-sources.json`; the next gather run skips it
     and picks the next-best **new** video. So repeated runs never re-queue the
     same clip.
+  - *Every video in a batch is a distinct account.* `pipeline.js` keeps at most
+    one video per source account per run (the account's highest-view clip, since
+    the shortlist is sorted by plays), so a top-N batch is N different creators.
   - *No output is a pixel-dupe.* Each render applies a lightly **randomized**
     colour grade + micro-zoom (`REPOST_UNIQUIFY`) on top of the caption burn-in
     and full re-encode, so even two re-clips of the same source aren't
