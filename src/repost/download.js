@@ -12,10 +12,16 @@ export function rawKeyFor(video) {
   return `${video.sourceAccount || 'unknown'}/${id}.mp4`;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 export async function downloadShortlist(shortlist) {
   const stored = [];
   for (const [i, video] of shortlist.entries()) {
     const label = `[${i + 1}/${shortlist.length}] @${video.sourceAccount}`;
+    // Stay under tikwm's ~1 req/sec free-tier limit: space each resolve out.
+    // resolveClipUrl also retries on rate-limit, but spacing avoids the wasted
+    // first attempt on every clip after the first.
+    if (i > 0) await sleep(1200);
     try {
       const clipUrl = await resolveClipUrl(video.webVideoUrl);
       const bytes = await downloadBytes(clipUrl);
