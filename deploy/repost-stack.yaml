@@ -56,12 +56,10 @@ Parameters:
 
 Resources:
   # --- Image registry ---
-  EcrRepo:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Ref ProjectName
-      ImageTagMutability: MUTABLE
-      EmptyOnDelete: true
+  # NOTE: the ECR repo is created/managed OUTSIDE this stack (created manually and
+  # the image pushed before deploy), so it is intentionally not declared here. The
+  # task definition and outputs reference it by URI, built from ProjectName, so the
+  # repo name MUST equal ProjectName (e.g. "tiktokclipping").
 
   # --- Logs ---
   LogGroup:

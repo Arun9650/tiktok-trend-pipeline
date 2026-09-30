@@ -1,11 +1,11 @@
 # Container image for the TikTok repost pipeline on AWS Fargate.
-# One image, two jobs: the ECS task definition supplies the command —
-#   gather:  node src/repost/pipeline.js    (run once, fills the queue)
-#   post:    node src/repost/autopost.js     (EventBridge polls every 30m)
-# The poll cadence is well under the 3h gap; posting time is driven by each
-# queue entry's scheduled time (set 3h apart at gather), with autopost's live
-# 3h-gap check as the safety net. Polling finer than the cadence avoids the
-# "6h drift" you'd get from a 3h tick racing the gap check.
+# Runs as one always-on task: src/repost/serve.js schedules the gather and
+# autopost jobs internally with node-cron (gather daily + on startup, autopost
+# every 30m), so no external EventBridge schedule is needed. Posting time is
+# driven by each queue entry's scheduled time (set 3h apart at gather), with
+# autopost's live 3h-gap check as the safety net.
+# The individual stages are still runnable standalone by overriding the command
+# (e.g. `node src/repost/pipeline.js` for a one-off gather).
 # ffmpeg is required by the Stage 4 re-clip step (src/repost/reclip.js); the
 # app talks to it via FFMPEG_PATH=ffmpeg (set in the task def env).
 FROM node:20-slim
@@ -33,5 +33,5 @@ ENV REPOST_DATA_DIR=/mnt/repost-data \
     FFMPEG_PATH=ffmpeg \
     NODE_ENV=production
 
-# Default to the posting job; the gather task overrides this command.
-CMD ["node", "src/repost/autopost.js"]
+# Default: the long-running scheduler (gather + autopost via node-cron).
+CMD ["node", "src/repost/serve.js"]

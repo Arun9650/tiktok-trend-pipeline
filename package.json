@@ -18,7 +18,8 @@
     "repost:dry": "node src/repost/pipeline.js --dry-run --auto-approve --max=5",
     "repost:resolve": "node src/repost/resolveAccounts.js",
     "repost:discover": "node src/repost/discoverVideos.js",
-    "repost:post": "node src/repost/autopost.js"
+    "repost:post": "node src/repost/autopost.js",
+    "repost:serve": "node src/repost/serve.js"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.190",
