@@ -54,18 +54,24 @@ async function probeMedia(inPath) {
   const h = dm ? Number(dm[2]) : 1920;
   const tm = s.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
   const duration = tm ? Number(tm[1]) * 3600 + Number(tm[2]) * 60 + Number(tm[3]) : undefined;
-  return { w, h, duration };
+  // Audio presence + sample rate drive the optional audio retune. `asetrate`
+  // needs the source rate to shift pitch cleanly; default to 44100 if unparsed.
+  const am = s.match(/Audio:[^\n]*?(\d{4,6})\s*Hz/);
+  const hasAudio = /Audio:/.test(s);
+  const sampleRate = am ? Number(am[1]) : 44100;
+  return { w, h, duration, hasAudio, sampleRate };
 }
 
 // Decide how to split a source into sequential parts. When splitting is on and
 // we know the duration, cut the usable span (after clipStartOffsetSec) into 2
 // equal parts — or 3 when it runs longer than splitThresholdSec (default 60s).
-// Without splitting (or a known duration) we fall back to one hook clip capped
-// at clipDurationSec, preserving the original behavior.
+// Only sources with MORE than splitMinSec (default 30s) of usable footage are
+// split at all; anything at or under that — plus the no-split / unknown-duration
+// cases — falls back to one hook clip capped at clipDurationSec.
 function planSegments(duration) {
   const offset = Math.max(0, config.clipStartOffsetSec);
   const usable = (duration || 0) - offset;
-  if (!config.splitParts || usable <= 0) {
+  if (!config.splitParts || usable <= config.splitMinSec) {
     return [{ part: 1, partCount: 1, start: offset, duration: config.clipDurationSec }];
   }
   const partCount = usable > config.splitThresholdSec ? 3 : 2;
@@ -98,6 +104,27 @@ function uniquifyFilters() {
   ];
 }
 
+// The audio counterpart to uniquifyFilters: a subtle, randomized retune of the
+// ORIGINAL audio so TikTok's audio fingerprint can't match the clip to its
+// source. asetrate reinterprets the samples at a shifted rate (moves pitch AND
+// speed together), the atempo then restores speed to ~original so only pitch
+// actually shifts, with a hair of extra tempo on top; aresample brings the
+// output back to a standard rate. ~±2% is barely perceptible but defeats the
+// fingerprint. Kept intentionally small — this nudges the source audio, it does
+// not replace it.
+function uniquifyAudioFilters(sampleRate) {
+  const r = (min, max) => min + Math.random() * (max - min);
+  const sr = sampleRate || 44100;
+  const pitch = r(0.98, 1.02);
+  const tempo = r(0.99, 1.01);
+  // atempo's valid range is 0.5–2.0; tempo/pitch stays well inside it here.
+  return [
+    `asetrate=${Math.round(sr * pitch)}`,
+    `atempo=${(tempo / pitch).toFixed(5)}`,
+    `aresample=${sr}`,
+  ].join(',');
+}
+
 async function tmpDir() {
   const dir = path.join(os.tmpdir(), 'repost-reclip', `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await fs.mkdir(dir, { recursive: true });
@@ -117,7 +144,7 @@ function readyKeyFor(video, part = 1, partCount = 1) {
  * color-emoji overlay row. Returns { args } ready to pass to ffmpeg (run with
  * cwd = `dir`, where cap.txt lives).
  */
-function buildFfmpegArgs({ inPath, outPath, dims, wrapped, nLines, emojiImgs, start, duration }) {
+function buildFfmpegArgs({ inPath, outPath, dims, wrapped, nLines, emojiImgs, start, duration, alterAudio, sampleRate }) {
   const y = config.captionYFrac;
   const fontsize = Math.max(16, Math.round(dims.h * config.captionSizeFrac));
   const lineSpacing = Math.round(fontsize * 0.25);
@@ -160,7 +187,22 @@ function buildFfmpegArgs({ inPath, outPath, dims, wrapped, nLines, emojiImgs, st
     cur = out;
   });
 
-  const finalLabel = n ? '[out]' : base;
+  // Video output: a filter-chain label if we applied any (grade/caption/emoji),
+  // otherwise the raw stream spec. Keeping these distinct lets the audio retune
+  // run as its own filter chain without breaking the video map.
+  const hasVideoChain = pre.length > 0 || n > 0;
+  const videoMap = hasVideoChain ? (n ? '[out]' : base) : '0:v';
+
+  // Audio: retune the source as its own filter chain -> [aout] (re-encoded to
+  // AAC, since a filtered stream can't be stream-copied), or pass the original
+  // through untouched with -c:a copy.
+  let audioMap = '0:a?';
+  let audioCodec = ['-c:a', 'copy'];
+  if (alterAudio) {
+    parts.push(`[0:a]${uniquifyAudioFilters(sampleRate)}[aout]`);
+    audioMap = '[aout]';
+    audioCodec = ['-c:a', 'aac', '-b:a', '128k'];
+  }
 
   const args = ['-y'];
   if (start > 0) args.push('-ss', String(start));
@@ -169,11 +211,10 @@ function buildFfmpegArgs({ inPath, outPath, dims, wrapped, nLines, emojiImgs, st
   args.push('-t', String(duration));
 
   if (parts.length) {
-    args.push('-filter_complex', parts.join(';'), '-map', finalLabel);
-  } else {
-    args.push('-map', '0:v');
+    args.push('-filter_complex', parts.join(';'));
   }
-  args.push('-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'copy', outPath);
+  args.push('-map', videoMap, '-map', audioMap);
+  args.push('-c:v', 'libx264', '-preset', 'veryfast', ...audioCodec, outPath);
   return args;
 }
 
@@ -207,12 +248,16 @@ export async function reclipOne(video) {
     console.log(`    note: ${emojis.length - emojiImgs.length} emoji couldn't be fetched, skipped.`);
   }
 
+  // Only retune audio when there's an audio track to retune.
+  const alterAudio = config.uniquifyAudio && media.hasAudio;
+
   const segments = planSegments(media.duration);
   const results = [];
   for (const seg of segments) {
     const outPath = path.join(dir, `out-${seg.part}.mp4`);
     const args = buildFfmpegArgs({
       inPath, outPath, dims, wrapped, nLines, emojiImgs, start: seg.start, duration: seg.duration,
+      alterAudio, sampleRate: media.sampleRate,
     });
     await execFileAsync(resolveFfmpeg(), args, { cwd: dir });
 

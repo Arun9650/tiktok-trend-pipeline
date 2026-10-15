@@ -13,7 +13,10 @@ const TIKTOK_DEFAULTS = {
   disabledStitch: process.env.BLOTATO_TIKTOK_DISABLE_STITCH === 'true',
   isBrandedContent: process.env.BLOTATO_TIKTOK_BRANDED_CONTENT === 'true',
   isYourBrand: process.env.BLOTATO_TIKTOK_YOUR_BRAND === 'true',
-  isAiGenerated: process.env.BLOTATO_TIKTOK_AI_GENERATED !== 'false',
+  // Reposted clips are real source video, NOT AI-generated. Default OFF — opt in
+  // only by explicitly setting BLOTATO_TIKTOK_AI_GENERATED=true. Flagging real
+  // video as AI gets it labelled "AI-generated content" and crushes reach.
+  isAiGenerated: process.env.BLOTATO_TIKTOK_AI_GENERATED === 'true',
 };
 
 async function blotato(endpoint, { method = 'GET', body } = {}) {

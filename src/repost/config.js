@@ -67,6 +67,10 @@ export const config = {
   // parts; 3 parts when the usable source runs longer than splitThresholdSec.
   // Set REPOST_SPLIT_PARTS=false to fall back to the single clipDurationSec clip.
   splitParts: bool(process.env.REPOST_SPLIT_PARTS, true),
+  // Only split sources LONGER than this (seconds of usable footage). A source at
+  // or under it posts as a single clip — splitting a short video into "parts"
+  // just chops one hook in half. Default 30s.
+  splitMinSec: num(process.env.REPOST_SPLIT_MIN_SEC, 30),
   splitThresholdSec: num(process.env.REPOST_SPLIT_3_OVER_SEC, 60),
   // Burn the caption text/emoji onto the clip? Off for now = filter-only output
   // (just the grade + micro-zoom, no on-screen text). The post description
@@ -97,6 +101,15 @@ export const config = {
   // on top of the caption burn-in and full re-encode. Same idea the generation
   // pipeline uses; set false to post the source pixels closer to untouched.
   uniquify: bool(process.env.REPOST_UNIQUIFY, true),
+  // Subtly retune the ORIGINAL audio (a ~±2% pitch + tempo shift, randomized per
+  // render) so TikTok's audio fingerprint can't match the clip back to its
+  // source. This is the audio counterpart to the video grade above — the single
+  // biggest "unoriginal content" giveaway was that we shipped the source audio
+  // byte-for-byte (-c:a copy). It is NOT a new track: the original audio is
+  // kept, just nudged. Turning this on re-encodes audio to AAC (copy can't carry
+  // a filter). Defaults to whatever REPOST_UNIQUIFY is; set false to go back to
+  // copying the untouched source audio.
+  uniquifyAudio: bool(process.env.REPOST_UNIQUIFY_AUDIO, bool(process.env.REPOST_UNIQUIFY, true)),
 
   // --- Stage 5 trending sounds ---
   // Where "today's best music" comes from (PRD open question). Two options:
